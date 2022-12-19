@@ -65,3 +65,30 @@ The dashboard provides a single pane of glass for observability and would includ
 - CPU & Memory should be monitored on the backend instance as it is not automatically scaled and therefore if it is running low on resources it should be scaled to the next available instance size to avoid outage.
 - Alerts for the Postgres DB covering memory, disk space, disk queue (indicating higher IOPS needed), virtual memory/paging use, network bandwidth.
 - Logs ingestion could be used to collect logs from the frontend and backend and log-based alerts can be set up when certain strings are found in the logs, such as `ERROR` lines pertaining to an issue in the application, and thus should trigger engineer action.
+
+### Networking scenario
+
+**Zero downtime deployments:**
+
+Web service deployments can be achieved in a number of ways. It depends on a combination of compute costs vs availability how much downtime an organisation is _potentially_ willing to accomodate.
+
+Above in section 1, I have explained that I would use a public load balancer routed to a private EKS cluster utilising VPC peering to connect parts of the application hosted in different GCP Projects.
+
+One of the best ways of ensuring that there is *zero* downtime during a web service deployment is to use blue/green deployments.
+This essentially keeps 2 versions of the web application running in 2 different services in the cluster. Say the current production version serving live traffic is blue, then the new version to be deployed would update the green service and then the load balancer would be updated to point to the DNS of the green service during CICD.
+
+It would work like this:
+
+Prior to new deployment
+
+- LIVE(blue): `web.company.io > gcploadbalancer.projecta.cloud > blue.web.company.io > blue.projecta.cluster.eks`
+
+- LIVE(green/standby): `DNS-BLACKHOLE > green.web.company.io > green.projecta.cluster.eks`
+
+After new deployment
+
+- LIVE(blue): `DNS-BLACKHOLE > blue.web.company.io > blue.projecta.cluster.eks`
+
+- LIVE(green/standby): `web.company.io > gcploadbalancer.projecta.cloud > green.web.company.io > green.projecta.cluster.eks`
+
+Using the above configured alarms and healthchecks, when a service is being deployed, a post-deployment healthcheck would be performed and then if the new/green service doesn't become healthy it would immediately be reverted to the blue service (by updating the target behind the load balancer), and the pipeline will fail and prevent the merge in git.

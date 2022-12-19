@@ -28,15 +28,15 @@ Please explain your choices and how would you manage updates to the Web service 
 ---
 
 ## **Answers - RM 19/12/22 **
-### 1. Architecture scenario
+### Architecture scenario I
 
 **Frontend Security Improvements:**
 
 - Instead of using a Public zonal GKE cluster, a Private zonal cluster should be used. This means that the container running the webapp would not be publically accessible but instead, it would have a privately-routable IP address and in order for the webapp to be publically accessible, it should sit behind a Global External HTTPS CLB (Cloud Load Balancing) load balancer. 
 - To further improve ingress security and protect from malicious attacks such as DDOS, a Web Application Firewall (WAF) such as Cloud Armor could also be introduced to sit in front of the load balancer (to drop suspicious packets before they are processed by the CLB and therefore mitigate any ingress traffic cost associated with an attack).
 - If the webapp contains lots of static assets, it would also make sense to place a Cloud CDN in front of the load balancer also, in order to reduce load balancer ingress traffic, load on the GKE service/cluster, and provide an additional layer of security.
-- Public docker images should be scanned upon docker pull, using an appropriate container-scanning tool such as Snyk or Falcon Crowdstrike to identify man in the middle (MITM) and prevent attacks by using public containers. A more secure solution (and cheaper as not involving Docker Hub subscription fees), would be to pull the public docker image (including any custom build steps) to a private container repository such as one in GCP. Each of these steps could be carried out in CICD.
-- A much later version of GKE should be used as 1.13.11 contains a number of known vulnerabilities. 
+- Public docker images should be scanned upon docker pull, using an appropriate container-scanning tool such as Snyk or Falcon Crowdstrike to identify man in the middle (MITM) and prevent attacks by using public containers. In addition, a more secure solution (and cheaper as not involving Docker Hub subscription fees), would be to pull the public docker image (including any custom build steps) to a private container repository such as one in GCP. Each of these steps could be carried out in CICD.
+- A much later version of GKE should be used as 1.13.11 contains a number of known vulnerabilities. The latest stable release being 1.23.
 - SCA (static code analysis) should be carried out on the project using a tool such as Snyk or Sonarcloud to identify any vulnerabilities in the code.
 
 **Backend Security Improvements:**
@@ -52,3 +52,16 @@ Please explain your choices and how would you manage updates to the Web service 
 
 - Rather than having an object level ACL in the bucket, IAM should be used where possible to enable easier management of permissions (less likely to leave permissions open) and to restrict the permissions to only resources within the appropriate Project (frontend/backend).
 - SCA tool such as Sonarcloud with approprate GCP policies would also allow overly-permissive IAM policies to be identified upon commit of the IAC during CICD.
+
+### Architecture scenario II
+
+**Monitoring the above resources:**
+- A GCP Cloud Monitoring dashboard could be used in a seperate Project D by adding the other projects as Monitored Projects. This can be achieved using IAM and the `roles/monitoring.viewer` permission, granted to the assumed role from Project D. 
+
+The dashboard provides a single pane of glass for observability and would include at least the following, some of which would be actively monitored to perform scaling actions or alert an engineer:
+
+- Alerts for HTTP 4XX/5XXs on the frontend load balancer or application endpoint - we would only want a certain threshold of these errors to occur and if there is too high a threshold then this would indicate a bad deployment. These alerts could trigger a manual alert to slack for example but a healthy HTTP 200 should also be used as a healthcheck on the container during deployment of a new container/pod definition. If the endpoint is not healthy then deployment should be rolled back (as would occur with deployment using terraform, for example).
+- Monitoring CPU & memory usage on the frontend container pool would NOT usually be used to send manual alerts to slack as it would create too much noise but instead should be used to form a scaling policy for the pod/service definition so that it can dynamically scale based on demand.
+- CPU & Memory should be monitored on the backend instance as it is not automatically scaled and therefore if it is running low on resources it should be scaled to the next available instance size to avoid outage.
+- Alerts for the Postgres DB covering memory, disk space, disk queue (indicating higher IOPS needed), virtual memory/paging use, network bandwidth.
+- Logs ingestion could be used to collect logs from the frontend and backend and log-based alerts can be set up when certain strings are found in the logs, such as `ERROR` lines pertaining to an issue in the application, and thus should trigger engineer action.
